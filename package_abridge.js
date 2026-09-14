@@ -3,10 +3,9 @@ const path = require("path");
 const TOML = require('fast-toml');
 const UglifyJS = require('uglify-js');
 const jsonminify = require("jsonminify");
-const util = require("util");
-const { exec } = require("child_process");
+const { parseArgs } = require("util");
+const { spawn } = require("child_process");
 const { exit } = require('process');
-const execPromise = util.promisify(exec);
 
 if (!(fs.existsSync('zola.toml'))) {
   throw new Error('ERROR: cannot find zola.toml!');
@@ -17,8 +16,8 @@ const js_prestyle = data.extra.js_prestyle;
 const js_switcher = data.extra.js_switcher;
 const js_email_encode = data.extra.js_email_encode;
 const js_copycode = data.extra.js_copycode;
-const search_library = data.extra.search_library;
-const index_format = data.search.index_format;
+let search_library = data.extra.search_library;
+let index_format = data.search.index_format;
 const uglyurls = data.extra.uglyurls;
 const js_bundle = data.extra.js_bundle;
 const pwa = data.extra.pwa;
@@ -32,9 +31,32 @@ const pwa_cache_all = data.extra.pwa_cache_all;
 const pwa_BASE_CACHE_FILES = data.extra.pwa_BASE_CACHE_FILES;
 const pwa_IGNORE_FILES = data.extra.pwa_IGNORE_FILES;
 
-// This is used to pass arguments to zola via npm, for example:
-// npm run abridge -- "--base-url https://abridge.pages.dev"
-var args = process.argv[2] ? ' ' + process.argv[2] : '';
+// Parse Abridge build options explicitly. Zola is launched directly without a shell.
+const VALID_MODES = new Set(['offline', 'elasticlunrjava', 'elasticlunr', 'pagefind', 'tinysearch']);
+const { values: cli } = parseArgs({
+  args: process.argv.slice(2),
+  options: {
+    mode: { type: 'string' },
+    'base-url': { type: 'string' },
+    drafts: { type: 'boolean', default: false },
+  },
+  strict: true,
+  allowPositionals: false,
+});
+if (cli.mode && !VALID_MODES.has(cli.mode)) {
+  throw new Error(`ERROR: invalid --mode "${cli.mode}". Valid modes: ${[...VALID_MODES].join(', ')}`);
+}
+
+function zolaBuildArgs() {
+  const zolaArgs = ['build'];
+  if (cli.drafts) zolaArgs.push('--drafts');
+  if (search_library === 'offline') {
+    zolaArgs.push('-u', path.join(__dirname, 'public'));
+  } else if (cli['base-url']) {
+    zolaArgs.push('--base-url', cli['base-url']);
+  }
+  return zolaArgs;
+}
 
 // check if abridge is used directly or as a theme.
 bpath = '';
@@ -48,35 +70,79 @@ _rmRegex(path.join(__dirname, "static/js/"), /^pagefind-entry.*json$/);
 _rmRecursive(path.join(__dirname, "static/js/index"));
 _rmRecursive(path.join(__dirname, "static/js/fragment"));
 
-async function execWrapper(cmd) {
-  const { stdout, stderr } = await execPromise(cmd);
-  if (stdout) {
-    console.log(stdout);
-  }
-  if (stderr) {
-    console.log(stderr);
-  }
+function runCommand(command, args, missingCommandMessage) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: 'inherit', shell: false });
+    child.on('error', (error) => {
+      if (error.code === 'ENOENT' && missingCommandMessage) {
+        reject(new Error(missingCommandMessage));
+      } else {
+        reject(error);
+      }
+    });
+    child.on('close', (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`${command} ${args.join(' ')} exited with code ${code}`));
+    });
+  });
+}
+
+function runZola() {
+  return runCommand(
+    'zola',
+    zolaBuildArgs(),
+    'ERROR: zola was not found in PATH.'
+  );
+}
+
+function runTinysearch() {
+  console.log('Creating Tinysearch index and WebAssembly...');
+  return runCommand(
+    'tinysearch',
+    ['--release', '-m', 'wasm', '-o', '-p', 'static', 'public/search_index.en.json'],
+    'ERROR: --mode tinysearch requires the tinysearch CLI to be installed and available in PATH.'
+  );
 }
 
 async function abridge() {
-  await sync();
   const { replaceInFileSync } = await import('replace-in-file');
   // set index_format for chosen search_library accordingly.
   if (search_library === 'offline') {
     replaceInFileSync({ files: 'zola.toml', from: /index_format.*=.*/g, to: "index_format = \"elasticlunr_javascript\"" });
-    args = args + " -u \"" + __dirname + "\/public\""//set base_url to the path on disk for offline site.
+    index_format = 'elasticlunr_javascript';
   } else if (search_library === 'elasticlunrjava') {
     replaceInFileSync({ files: 'zola.toml', from: /index_format.*=.*/g, to: "index_format = \"elasticlunr_javascript\"" });
+    index_format = 'elasticlunr_javascript';
   } else if (search_library === 'elasticlunr') {
     replaceInFileSync({ files: 'zola.toml', from: /index_format.*=.*/g, to: "index_format = \"elasticlunr_json\"" });
+    index_format = 'elasticlunr_json';
   } else if (search_library === 'pagefind') {
     replaceInFileSync({ files: 'zola.toml', from: /index_format.*=.*/g, to: "index_format = \"fuse_json\"" });
+    index_format = 'fuse_json';
   } else if (search_library === 'tinysearch') {
     replaceInFileSync({ files: 'zola.toml', from: /index_format.*=.*/g, to: "index_format = \"fuse_json\"" });
+    index_format = 'fuse_json';
   }
 
   console.log('Zola Build to generate files for minification:');
-  await execWrapper('zola build' + args);
+  await runZola();
+
+  if (search_library === 'tinysearch') {
+    const siteTinysearchConfig = path.join('static', 'tinysearch.toml');
+    const themeTinysearchConfig = path.join(bpath, 'static', 'tinysearch.toml');
+    const tinysearchConfig = fs.existsSync(siteTinysearchConfig) ? siteTinysearchConfig : themeTinysearchConfig;
+    if (!fs.existsSync(tinysearchConfig)) {
+      throw new Error('ERROR: Tinysearch mode requires static/tinysearch.toml (or themes/abridge/static/tinysearch.toml when Abridge is used as a theme).');
+    }
+    fs.copyFileSync(tinysearchConfig, path.join('public', 'tinysearch.toml'));
+    console.log(`Using Tinysearch config: ${tinysearchConfig}`);
+    await runTinysearch();
+    const tinysearchWasm = path.join('static', 'tinysearch_engine.wasm');
+    if (!fs.existsSync(tinysearchWasm)) {
+      throw new Error('ERROR: Tinysearch did not generate static/tinysearch_engine.wasm.');
+    }
+    fs.copyFileSync(tinysearchWasm, path.join('public', 'tinysearch_engine.wasm'));
+  }
 
   //check that static/js exists, do this after zola build, it will handle creating static if missing.
   var jsdir = 'static/js';
@@ -146,6 +212,15 @@ async function abridge() {
 
   if (pwa) {// Update pwa settings, file list, and hashes.
     if (typeof pwa_VER !== 'undefined' && typeof pwa_NORM_TTL !== 'undefined' && typeof pwa_LONG_TTL !== 'undefined' && typeof pwa_TTL_NORM !== 'undefined' && typeof pwa_TTL_LONG !== 'undefined' && typeof pwa_TTL_EXEMPT !== 'undefined') {
+      for (const [name, value] of [
+        ['pwa_TTL_NORM', pwa_TTL_NORM],
+        ['pwa_TTL_LONG', pwa_TTL_LONG],
+        ['pwa_TTL_EXEMPT', pwa_TTL_EXEMPT],
+        ['pwa_BASE_CACHE_FILES', pwa_BASE_CACHE_FILES],
+        ['pwa_IGNORE_FILES', pwa_IGNORE_FILES],
+      ]) {
+        if (!Array.isArray(value)) throw new Error(`ERROR: ${name} must be a TOML array in zola.toml.`);
+      }
       // update from abridge theme.
       fs.copyFileSync(bpath + 'static/sw.js', 'static/sw.js');
       fs.copyFileSync(bpath + 'static/js/sw_load.js', 'static/js/sw_load.js');
@@ -160,52 +235,32 @@ async function abridge() {
       if (fs.existsSync('static/sw.js')) {
         replaceInFileSync({ files: 'static/sw.js', from: /NORM_TTL.*=.*/g, to: "NORM_TTL = " + pwa_NORM_TTL + ";" });
         replaceInFileSync({ files: 'static/sw.js', from: /LONG_TTL.*=.*/g, to: "LONG_TTL = " + pwa_LONG_TTL + ";" });
-        replaceInFileSync({ files: 'static/sw.js', from: /TTL_NORM.*=.*/g, to: "TTL_NORM = [" + pwa_TTL_NORM + "];" });
-        replaceInFileSync({ files: 'static/sw.js', from: /TTL_LONG.*=.*/g, to: "TTL_LONG = [" + pwa_TTL_LONG + "];" });
-        replaceInFileSync({ files: 'static/sw.js', from: /TTL_EXEMPT.*=.*/g, to: "TTL_EXEMPT = [" + pwa_TTL_EXEMPT + "];" });
+        replaceInFileSync({ files: 'static/sw.js', from: /TTL_NORM.*=.*/g, to: "TTL_NORM = " + JSON.stringify(pwa_TTL_NORM) + ";" });
+        replaceInFileSync({ files: 'static/sw.js', from: /TTL_LONG.*=.*/g, to: "TTL_LONG = " + JSON.stringify(pwa_TTL_LONG) + ";" });
+        replaceInFileSync({ files: 'static/sw.js', from: /TTL_EXEMPT.*=.*/g, to: "TTL_EXEMPT = " + JSON.stringify(pwa_TTL_EXEMPT) + ";" });
       }
 
+      let cacheFiles;
       if (pwa_cache_all === true) {
         console.log('info: pwa_cache_all = true in zola.toml, so caching the entire site.\n');
-        // Generate array from the list of files, for the entire site.
-
-        var dir = 'public';
-        try {
-          fs.mkdirSync(dir);
-        } catch (e) {
-          if (e.code != 'EEXIST') throw e;
-        }
-        const path = './public/';
-        cache = '';
-        files = fs.readdirSync(path, { recursive: true, withFileTypes: false })
-          .forEach(
-            (file) => {
-              // check if is directory, if not then add the path/file
-              if (!fs.lstatSync(path + file).isDirectory()) {
-                // format output
-                item = "/" + file.replace(/index\.html$/i, '');// strip index.html from path
-                item = item.replace(/\\/g, '/');// replace backslash with forward slash for Windows
-
-                var arrayLength = pwa_IGNORE_FILES.length;
-                for (var i = 0; i < arrayLength; i++) {
-                    regex = new RegExp(`^\/${pwa_IGNORE_FILES[i]}`, `i`);
-                    item = item.replace(regex, '');// dont cache files in the pwa_IGNORE_FILES array
-                }
-
-                // if formatted output is not empty line then append it to cache var
-                if (item != '') {// skip empty lines
-                  cache = cache + "'" + item + "',";
-                }
-              }
-            }
+        fs.mkdirSync('public', { recursive: true });
+        cacheFiles = [];
+        const publicDir = './public/';
+        for (const file of fs.readdirSync(publicDir, { recursive: true, withFileTypes: false })) {
+          if (fs.lstatSync(path.join(publicDir, file)).isDirectory()) continue;
+          let item = '/' + file.replace(/\\/g, '/').replace(/index\.html$/i, '');
+          const itemLower = item.toLowerCase();
+          const ignored = pwa_IGNORE_FILES.some((ignore) =>
+            itemLower.startsWith('/' + String(ignore).replace(/^\/+/, '').toLowerCase())
           );
-        cache = cache.slice(0, -1)// remove the last comma
-      } else if (pwa_BASE_CACHE_FILES) {
-        cache = pwa_BASE_CACHE_FILES;
+          if (!ignored && item !== '') cacheFiles.push(item);
+        }
+      } else {
+        cacheFiles = [...pwa_BASE_CACHE_FILES];
       }
 
-      cache = cache.split(",").sort().join(",")//sort the cache list, this should help keep the commit history cleaner.
-      cache = 'this.BASE_CACHE_FILES = [' + cache + '];';
+      cacheFiles.sort();
+      const cache = 'this.BASE_CACHE_FILES = ' + JSON.stringify(cacheFiles) + ';';
       // update the BASE_CACHE_FILES variable in the sw.js service worker file
       results = replaceInFileSync({
         files: 'static/sw.js',
@@ -257,7 +312,7 @@ async function abridge() {
   _rmRegex(path.join(__dirname, "static/js/"), /^pagefind_search\.js$/);//pagefind intermediate file that is now in bundle.
 
   console.log('Zola Build to generate new integrity hashes for the previously minified files:');
-  await execWrapper('zola build' + args);
+  await runZola();
 }
 
 async function _headersWASM() {
@@ -403,19 +458,19 @@ async function searchChange(searchOption) {
   replaceInFileSync({ files: 'zola.toml', from: /^search_library\s*=.*/gm, to: 'search_library = \"' + searchOption + '\"' });
 }
 
-if (args === ' offline') {
-  searchChange('offline');
-} else if (args === ' elasticlunrjava') {
-  searchChange('elasticlunrjava');
-} else if (args === ' elasticlunr') {
-  searchChange('elasticlunr');
-} else if (args === ' pagefind') {
-  searchChange('pagefind');
-} else if (args === ' tinysearch') {
-  searchChange('tinysearch');
-} else {
-  abridge();
+async function main() {
+  await sync();
+  if (cli.mode) {
+    await searchChange(cli.mode);
+    search_library = cli.mode;
+  }
+  await abridge();
 }
+
+main().catch((error) => {
+  console.error(error);
+  exit(1);
+});
 
 async function createPagefindIndex() {
   console.log("Creating Pagefind index...");

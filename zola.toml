@@ -251,19 +251,19 @@ pwa_NORM_TTL = 0 #  86400 is reasonable. html, json, xml, anything else undefine
 pwa_LONG_TTL = 0 # 604800 is reasonable.
 
 ### list of files that overrides TTL_LONG/TTL_EXEMPT to be a NORM TTL.
-pwa_TTL_NORM = '"sw.min.js", "sw_load.min.js"'
+pwa_TTL_NORM = ["sw.min.js", "sw_load.min.js"]
 
 ### TTL_LONG file extensions will be cached for the LONG_TTL duration.
-pwa_TTL_LONG = '"jpg", "jpeg", "png", "gif", "webp", "avif", "ico", "svg", "xsl", "txt"'
+pwa_TTL_LONG = ["jpg", "jpeg", "png", "gif", "webp", "avif", "ico", "svg", "xsl", "txt"]
 
 ### TTL_EXEMPT file extensions will be cached indefinitely unless sw_load version is incremented, which would invalidate any existing cache. (and a new cache would be started)
-pwa_TTL_EXEMPT = '"js", "css", "otf", "eot", "ttf", "woff", "woff2", "mp4", "webm", "mp3", "ogg"'
+pwa_TTL_EXEMPT = ["js", "css", "otf", "eot", "ttf", "woff", "woff2", "mp4", "webm", "mp3", "ogg"]
 
 ### If set to true then the entire site is cached. (useful for making an entire site usable while offline)
 pwa_cache_all = true
 
 ### List of Files for the PWA to initially Cache, used if pwa_cache_all = false
-pwa_BASE_CACHE_FILES = "'/js/theme.min.js','/js/theme_light.min.js','/abridge.css','/js/abridge.min.js','/','/404.html','/offline/','/manifest.min.json'"
+pwa_BASE_CACHE_FILES = ["/js/theme.min.js", "/js/theme_light.min.js", "/abridge.css", "/js/abridge.min.js", "/", "/404.html", "/offline/", "/manifest.min.json"]
 
 pwa_IGNORE_FILES = ["_headers","sw.min.js","sw.js"]
 #pwa_IGNORE_FILES = ["_headers","sw.min.js","sw.js","android-chrome-192x192.png","android-chrome-512x512.png","apple-touch-icon.png","favicon-16x16.png","favicon-32x32.png","favicon.ico","m48.png","m72.png","m96.png","m128.png","m192.png","m384.png","m512.png","m1024.png","mstile-150x150.png"]

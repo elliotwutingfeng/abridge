@@ -10,7 +10,8 @@ class Pwa {
         console.info(`Host: ${this.host}`);
         this.OFFLINE_PAGE = '/offline/';
         this.NOT_FOUND_PAGE = '/404.html';
-        this.CACHE_NAME = `content-v${this.CACHE_VERSION}`;
+        this.CACHE_PREFIX = "abridge-content-v";
+        this.CACHE_NAME = `${this.CACHE_PREFIX}${this.CACHE_VERSION}`;
         // 3600=1hour, 28800=8hours, 86400=1day, 604800=1week, 1209600=2weeks
         this.NORM_TTL = 0;
         this.LONG_TTL = 0;
@@ -82,7 +83,7 @@ class Pwa {
         return new Promise(
             (resolve, reject) => {
                 caches.keys()
-                    .then((keys) => keys.filter((key) => !~currentCaches.indexOf(key)))
+                    .then((keys) => keys.filter((key) => key.startsWith(this.CACHE_PREFIX) && !currentCaches.includes(key)))
                     .then((legacy) => {
                         if (legacy.length) {
                             Promise.all(legacy.map((legacyKey) => caches.delete(legacyKey))

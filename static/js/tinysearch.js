@@ -100,8 +100,9 @@ window.onload = function () {
                 ResultsClone.id = "results";
 
                 var headerDiv = document.createElement("div");
-                var headerContent = '<form name="closeSearch"><h2><button type="submit" title="Close Search"><i class="svgs x"></i></button> <i class="svgs search"></i> '.concat(document.getElementById("searchinput").value, "</h2></form>");
+                var headerContent = '<form name="closeSearch"><h2><button type="submit" title="Close Search"><i class="svgs x"></i></button> <i class="svgs search"></i> <span class="search-query"></span></h2></form>';
                 headerDiv.innerHTML = headerContent;
+            headerDiv.querySelector(".search-query").textContent = document.getElementById("searchinput").value;
                 ResultsClone.insertBefore(headerDiv, ResultsClone.firstChild);
 
                 main.innerHTML = ResultsClone.outerHTML;
@@ -117,9 +118,26 @@ window.onload = function () {
                 }
             }
 
-            function markTerm(input, term) {
-                if (!input) return "";
-                return String(input).replace(new RegExp('(^|)(' + term + ')(|$)', 'ig'), '$1<mark>$2</mark>$3');
+            function markTerm(target, input, term) {
+                target.textContent = "";
+                var text = String(input || "");
+                var needle = String(term || "");
+                if (!needle) {
+                    target.textContent = text;
+                    return;
+                }
+                var lowerText = text.toLowerCase();
+                var lowerNeedle = needle.toLowerCase();
+                var start = 0;
+                var match;
+                while ((match = lowerText.indexOf(lowerNeedle, start)) !== -1) {
+                    target.appendChild(document.createTextNode(text.slice(start, match)));
+                    var mark = document.createElement("mark");
+                    mark.textContent = text.slice(match, match + needle.length);
+                    target.appendChild(mark);
+                    start = match + needle.length;
+                }
+                target.appendChild(document.createTextNode(text.slice(start)));
             }
 
             function unwrapMeta(meta) {
@@ -169,8 +187,8 @@ window.onload = function () {
                             d = entry.querySelector('span:nth-child(2)');
                         var resolved = resolveResultUrl(url);
                         a.href = resolved + (resolved.indexOf('?') >= 0 ? '&' : '?') + 'q=' + encodeURIComponent(val);
-                        t.innerHTML = title || "";
-                        d.innerHTML = markTerm(meta || "", val);
+                        t.textContent = title || "";
+                        markTerm(d, meta || "", val);
 
                         suggestions.appendChild(entry);
                     }
