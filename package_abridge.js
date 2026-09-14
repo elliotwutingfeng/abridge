@@ -382,14 +382,12 @@ function bundle(bpath, js_prestyle, js_switcher, js_email_encode, js_copycode, s
   }
   if (search_library) {
     if ((search_library === 'offline' || (search_library === 'elasticlunrjava' && uglyurls === true))) {
-      minify_files.push('public/search_index.en.js');
       minify_files.push(path.join(bpath, 'static/js/elasticlunr_scope_begin.js'));
       minify_files.push(path.join(bpath, 'static/js/elasticlunr.min.js'));
       minify_files.push(path.join(bpath, 'static/js/elasticlunr_bridge.js'));
       minify_files.push(path.join(bpath, 'static/js/searchjavaugly.js'));
       minify_files.push(path.join(bpath, 'static/js/elasticlunr_scope_end.js'));
     } else if (search_library === 'elasticlunrjava') {
-      minify_files.push('public/search_index.en.js');
       minify_files.push(path.join(bpath, 'static/js/elasticlunr_scope_begin.js'));
       minify_files.push(path.join(bpath, 'static/js/elasticlunr.min.js'));
       minify_files.push(path.join(bpath, 'static/js/elasticlunr_bridge.js'));
